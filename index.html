@@ -12,42 +12,71 @@
     .footer { flex: 0 0 auto; padding: 12px; border-top: 1px solid #ddd; position: sticky; bottom: 0; background: #fff; }
     button { width: 100%; padding: 14px 18px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
     .hint { font-size: 12px; color: #666; margin-top: 8px; }
+    .toast { position: fixed; right: 12px; bottom: 12px; background: #333; color: #fff; padding: 10px 12px; border-radius: 8px; opacity: 0.95; display: none; }
   </style>
 </head>
 <body>
   <div class="wrapper">
     <div class="textarea-wrap">
-      <textarea id="editor" placeholder="ここに音声入力（Chrome拡張）や貼り付けでテキストを入れてください。"></textarea>
+      <textarea id="editor" placeholder="ここにテキストを入れてください。"></textarea>
     </div>
     <div class="footer">
-      <button id="pasteBtn" type="button">クリップボードをペースト</button>
+      <button id="copyBtn" type="button">クリップボードへコピー</button>
       <div class="hint">
-        ※ GitHub Pages 等の HTTPS 環境であれば、クリック後に許可が出ればクリップボードの読み取りが可能です。<br />
-        ※ 挿入位置（カーソル位置）に貼り付けられます。
+        ※ HTTPS 環境（GitHub Pages 等）または localhost であれば、クリック操作でクリップボードへコピーできます。<br />
+        ※ コピー後はネイティブアプリ側で <kbd>Ctrl</kbd>+<kbd>V</kbd> 等でペーストしてください。
       </div>
     </div>
   </div>
+  <div id="toast" class="toast" role="status" aria-live="polite">コピーしました</div>
   <script>
     const ta = document.getElementById('editor');
-    const pasteBtn = document.getElementById('pasteBtn');
-    function insertAtCursor(textarea, text) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const before = textarea.value.slice(0, start);
-      const after = textarea.value.slice(end);
-      textarea.value = before + text + after;
-      const caret = start + text.length;
-      textarea.selectionStart = textarea.selectionEnd = caret;
-      textarea.focus();
+    const copyBtn = document.getElementById('copyBtn');
+    const toast = document.getElementById('toast');
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 1500);
     }
-    pasteBtn.addEventListener('click', async () => {
+
+    async function copyText(text) {
+      // Try modern API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+      // Fallback for non-secure contexts: execCommand
       try {
-        const txt = await navigator.clipboard.readText();
-        insertAtCursor(ta, txt);
+        const selStart = ta.selectionStart, selEnd = ta.selectionEnd;
+        const prev = ta.value;
+        ta.select();
+        const ok = document.execCommand('copy');
+        // restore selection/caret
+        ta.value = prev;
+        ta.selectionStart = selStart;
+        ta.selectionEnd = selEnd;
+        ta.focus();
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      const text = ta.value;
+      try {
+        const ok = await copyText(text);
+        if (ok) {
+          showToast('コピーしました');
+        } else {
+          alert('クリップボードへのコピーに失敗しました。HTTPS(またはlocalhost)での実行をご確認ください。');
+        }
       } catch (err) {
-        alert('クリップボードの読み取りに失敗しました。ブラウザの許可設定や HTTPS を確認してください。\n' + err);
+        alert('クリップボードへのコピーでエラーが発生しました:\n' + err);
       }
     });
+
     window.addEventListener('DOMContentLoaded', () => { ta.focus(); });
   </script>
 </body>
