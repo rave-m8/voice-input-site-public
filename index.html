@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>音声入力テスト用ページ</title>
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Noto Sans JP', 'Yu Gothic UI', Meiryo, sans-serif; }
+    .wrapper { display: flex; flex-direction: column; height: 100%; width: 100%; }
+    .textarea-wrap { flex: 1 1 auto; padding: 12px; box-sizing: border-box; }
+    textarea { width: 100%; height: 100%; box-sizing: border-box; resize: none; font-size: 18px; line-height: 1.6; padding: 12px; }
+    .footer { flex: 0 0 auto; padding: 12px; border-top: 1px solid #ddd; position: sticky; bottom: 0; background: #fff; }
+    button { width: 100%; padding: 14px 18px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
+    .hint { font-size: 12px; color: #666; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="textarea-wrap">
+      <textarea id="editor" placeholder="ここに音声入力（Chrome拡張）や貼り付けでテキストを入れてください。"></textarea>
+    </div>
+    <div class="footer">
+      <button id="pasteBtn" type="button">クリップボードをペースト</button>
+      <div class="hint">
+        ※ GitHub Pages 等の HTTPS 環境であれば、クリック後に許可が出ればクリップボードの読み取りが可能です。<br />
+        ※ 挿入位置（カーソル位置）に貼り付けられます。
+      </div>
+    </div>
+  </div>
+  <script>
+    const ta = document.getElementById('editor');
+    const pasteBtn = document.getElementById('pasteBtn');
+    function insertAtCursor(textarea, text) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const before = textarea.value.slice(0, start);
+      const after = textarea.value.slice(end);
+      textarea.value = before + text + after;
+      const caret = start + text.length;
+      textarea.selectionStart = textarea.selectionEnd = caret;
+      textarea.focus();
+    }
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const txt = await navigator.clipboard.readText();
+        insertAtCursor(ta, txt);
+      } catch (err) {
+        alert('クリップボードの読み取りに失敗しました。ブラウザの許可設定や HTTPS を確認してください。\n' + err);
+      }
+    });
+    window.addEventListener('DOMContentLoaded', () => { ta.focus(); });
+  </script>
+</body>
+</html>
