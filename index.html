@@ -22,6 +22,11 @@
     </div>
     <div class="footer">
       <button id="copyBtn" type="button">クリップボードへコピー</button>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="autoCopy" type="checkbox" />
+        自動コピー（変更を検知したらクリップボードへ転送）
+      </label>
+      <div id="autoStatus" class="hint" aria-live="polite"></div>
       <div class="hint">
         ※ HTTPS 環境（GitHub Pages 等）または localhost であれば、クリック操作でクリップボードへコピーできます。<br />
         ※ コピー後はネイティブアプリ側で <kbd>Ctrl</kbd>+<kbd>V</kbd> 等でペーストしてください。
@@ -40,19 +45,31 @@
       setTimeout(() => { toast.style.display = 'none'; }, 1500);
     }
 
-    async function copyText(text) {
-      // Try modern API first
+    // ---- クリップボード共通関数（重複抑止付き） ----
+    const LAST_KEY = 'lastCopiedFromThisSite';
+    let lastCopied = localStorage.getItem(LAST_KEY) ?? '';
+
+    async function readClipboardTop() {
+      try {
+        if (navigator.clipboard && window.isSecureContext && navigator.clipboard.readText) {
+          return await navigator.clipboard.readText();
+        }
+      } catch (e) {}
+      return null; // 読めない場合
+    }
+
+    async function writeClipboard(text) {
+      // Modern API
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         return true;
       }
-      // Fallback for non-secure contexts: execCommand
+      // Fallback for non-secure contexts
       try {
         const selStart = ta.selectionStart, selEnd = ta.selectionEnd;
         const prev = ta.value;
         ta.select();
         const ok = document.execCommand('copy');
-        // restore selection/caret
         ta.value = prev;
         ta.selectionStart = selStart;
         ta.selectionEnd = selEnd;
@@ -63,12 +80,35 @@
       }
     }
 
+    /**
+     * クリップボード履歴の重複増殖を抑止するコピー。
+     * - 直前に本サイトがコピーした内容と同一 && クリップボードの先頭も同一ならスキップ（履歴を増やさない）
+     * - それ以外は通常コピーして lastCopied を更新
+     */
+    async function copyWithDedupe(text) {
+      const cur = text;
+      // クリップボードの先頭を読める場合は確認
+      const top = await readClipboardTop(); // null の場合は不明
+      const duplicate = (cur === lastCopied) && (top === null || top === lastCopied || top === cur);
+      if (duplicate) {
+        // 同一内容での連打はスキップ（履歴を増やさない）
+        return { ok: true, skipped: true };
+      }
+      const ok = await writeClipboard(cur);
+      if (ok) {
+        lastCopied = cur;
+        try { localStorage.setItem(LAST_KEY, lastCopied); } catch {}
+      }
+      return { ok, skipped: false };
+    }
+
+    // 既存のボタンクリックに重複抑止版を適用
     copyBtn.addEventListener('click', async () => {
       const text = ta.value;
       try {
-        const ok = await copyText(text);
-        if (ok) {
-          showToast('コピーしました');
+        const res = await copyWithDedupe(text);
+        if (res.ok) {
+          showToast(res.skipped ? '重複なのでコピーをスキップしました' : 'コピーしました');
         } else {
           alert('クリップボードへのコピーに失敗しました。HTTPS(またはlocalhost)での実行をご確認ください。');
         }
@@ -78,6 +118,81 @@
     });
 
     window.addEventListener('DOMContentLoaded', () => { ta.focus(); });
+
+    // === 自動コピー機能 ===
+    const autoCopy = document.getElementById('autoCopy');
+    const autoStatus = document.getElementById('autoStatus');
+    const POLL_MS = 300;
+    const MIN_INTERVAL_MS = 500;
+    const SKIP_WHITESPACE_ONLY = true;
+
+    let lastText = '';
+    let lastCopiedAt = 0;
+    let autoTimer = null;
+
+    function hasMeaningfulChange(a, b) {
+      if (a === b) return false;
+      if (!SKIP_WHITESPACE_ONLY) return true;
+      return a.replace(/\s+/g,'') !== b.replace(/\s+/g,'');
+    }
+
+    function setAutoStatus(msg) {
+      autoStatus.textContent = msg;
+    }
+
+    async function pollAndCopy() {
+      const now = Date.now();
+      const cur = ta.value;
+      if (hasMeaningfulChange(cur, lastText) && (now - lastCopiedAt) > MIN_INTERVAL_MS) {
+        if (cur.length === 0) {
+          lastText = cur;
+          return;
+        }
+        const res = await copyWithDedupe(cur);
+        if (res.ok) {
+          if (!res.skipped) lastCopiedAt = now;
+          lastText = cur;
+          setAutoStatus(res.skipped ? '自動コピー：重複のためスキップ' : `自動コピー済み（${new Date().toLocaleTimeString()}）`);
+        } else {
+          setAutoStatus('クリップボードへの自動コピーに失敗しました。HTTPS または localhost で実行されているかをご確認ください。');
+        }
+      }
+    }
+
+    async function startAutoCopy() {
+      lastText = ta.value;
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          await navigator.permissions.query({ name: "clipboard-write" });
+        }
+      } catch {}
+      if (!autoTimer) {
+        autoTimer = setInterval(pollAndCopy, POLL_MS);
+        setAutoStatus('自動コピー：稼働中');
+      }
+    }
+
+    function stopAutoCopy() {
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+      setAutoStatus('自動コピー：停止中');
+    }
+
+    autoCopy.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        startAutoCopy();
+      } else {
+        stopAutoCopy();
+      }
+    });
+
+    ta.addEventListener('input', () => {
+      // pollAndCopy(); // 入力直後に即時コピーしたい場合に有効化
+    });
+
+    stopAutoCopy();
   </script>
 </body>
 </html>
