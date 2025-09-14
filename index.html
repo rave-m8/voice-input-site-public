@@ -10,7 +10,9 @@
     .textarea-wrap { flex: 1 1 auto; padding: 12px; box-sizing: border-box; }
     textarea { width: 100%; height: 100%; box-sizing: border-box; resize: none; font-size: 18px; line-height: 1.6; padding: 12px; }
     .footer { flex: 0 0 auto; padding: 12px; border-top: 1px solid #ddd; position: sticky; bottom: 0; background: #fff; }
-    button { width: 100%; padding: 14px 18px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
+    button { padding: 12px 16px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
+    .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .row > * { margin-top:8px; }
     .hint { font-size: 12px; color: #666; margin-top: 8px; }
     .toast { position: fixed; right: 12px; bottom: 12px; background: #333; color: #fff; padding: 10px 12px; border-radius: 8px; opacity: 0.95; display: none; }
   </style>
@@ -21,15 +23,19 @@
       <textarea id="editor" placeholder="ここにテキストを入れてください。"></textarea>
     </div>
     <div class="footer">
-      <button id="copyBtn" type="button">クリップボードへコピー</button>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-        <input id="autoCopy" type="checkbox" />
-        自動コピー（変更を検知したらクリップボードへ転送）
-      </label>
+      <div class="row">
+        <button id="copyBtn" type="button">クリップボードへコピー</button>
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input id="copyOnBlur" type="checkbox" />
+          フォーカス喪失時にコピー
+        </label>
+      </div>
       <div id="autoStatus" class="hint" aria-live="polite"></div>
       <div class="hint">
-        ※ HTTPS 環境（GitHub Pages 等）または localhost であれば、クリック操作でクリップボードへコピーできます。<br />
-        ※ コピー後はネイティブアプリ側で <kbd>Ctrl</kbd>+<kbd>V</kbd> 等でペーストしてください。
+        ※ このモードでは、<b>ウィンドウ/タブのフォーカスを失ったタイミング</b>で、テキストエリアの内容をクリップボードにコピーします。<br />
+        ※ 直前と同一の内容、または既にクリップボード先頭が同一のときはコピーをスキップし、履歴の重複を抑止します。<br />
+        ※ クリップボードの参照は <code>clipboard-read</code> が <code>granted</code> のときのみ行います（ポップアップを誘発しません）。<br />
+        ※ HTTPS または localhost でご利用ください。
       </div>
     </div>
   </div>
@@ -37,7 +43,11 @@
   <script>
     const ta = document.getElementById('editor');
     const copyBtn = document.getElementById('copyBtn');
+    const copyOnBlur = document.getElementById('copyOnBlur');
+    const autoStatus = document.getElementById('autoStatus');
     const toast = document.getElementById('toast');
+
+    function setStatus(msg) { autoStatus.textContent = msg; }
 
     function showToast(msg) {
       toast.textContent = msg;
@@ -45,27 +55,37 @@
       setTimeout(() => { toast.style.display = 'none'; }, 1500);
     }
 
-    // ---- クリップボード共通関数（重複抑止付き） ----
+    // === クリップボード（重複抑止 + 読み取りは granted の時のみ） ===
     const LAST_KEY = 'lastCopiedFromThisSite';
     let lastCopied = localStorage.getItem(LAST_KEY) ?? '';
 
-    async function readClipboardTop() {
+    async function canReadClipboard() {
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const st = await navigator.permissions.query({ name: 'clipboard-read' });
+          return st && st.state === 'granted';
+        }
+      } catch {}
+      return false;
+    }
+
+    async function readClipboardTopIfGranted() {
+      if (!(await canReadClipboard())) return null;
       try {
         if (navigator.clipboard && window.isSecureContext && navigator.clipboard.readText) {
           return await navigator.clipboard.readText();
         }
-      } catch (e) {}
-      return null; // 読めない場合
+      } catch {}
+      return null;
     }
 
     async function writeClipboard(text) {
-      // Modern API
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         return true;
       }
-      // Fallback for non-secure contexts
       try {
+        // 非セキュア時のフォールバック（selection hack）
         const selStart = ta.selectionStart, selEnd = ta.selectionEnd;
         const prev = ta.value;
         ta.select();
@@ -75,25 +95,21 @@
         ta.selectionEnd = selEnd;
         ta.focus();
         return ok;
-      } catch (e) {
-        return false;
-      }
+      } catch { return false; }
     }
 
-    /**
-     * クリップボード履歴の重複増殖を抑止するコピー。
-     * - 直前に本サイトがコピーした内容と同一 && クリップボードの先頭も同一ならスキップ（履歴を増やさない）
-     * - それ以外は通常コピーして lastCopied を更新
-     */
     async function copyWithDedupe(text) {
       const cur = text;
-      // クリップボードの先頭を読める場合は確認
-      const top = await readClipboardTop(); // null の場合は不明
-      const duplicate = (cur === lastCopied) && (top === null || top === lastCopied || top === cur);
-      if (duplicate) {
-        // 同一内容での連打はスキップ（履歴を増やさない）
-        return { ok: true, skipped: true };
+      // 1) クリップボード先頭が同一ならスキップ（許可がある場合のみ確認）
+      const top = await readClipboardTopIfGranted(); // null の場合は未知
+      if (top !== null && top === cur) {
+        return { ok: true, skipped: true, reason: 'clipboard-top-same' };
       }
+      // 2) 直前に本サイトがコピーした内容と同じならスキップ
+      if (cur === lastCopied) {
+        return { ok: true, skipped: true, reason: 'last-same' };
+      }
+      // 3) 通常コピー
       const ok = await writeClipboard(cur);
       if (ok) {
         lastCopied = cur;
@@ -102,97 +118,61 @@
       return { ok, skipped: false };
     }
 
-    // 既存のボタンクリックに重複抑止版を適用
+    // 手動コピー
     copyBtn.addEventListener('click', async () => {
       const text = ta.value;
       try {
         const res = await copyWithDedupe(text);
         if (res.ok) {
-          showToast(res.skipped ? '重複なのでコピーをスキップしました' : 'コピーしました');
+          showToast(res.skipped ? '重複のためスキップしました' : 'コピーしました');
         } else {
           alert('クリップボードへのコピーに失敗しました。HTTPS(またはlocalhost)での実行をご確認ください。');
         }
       } catch (err) {
-        alert('クリップボードへのコピーでエラーが発生しました:\n' + err);
+        alert('クリップボードへのコピーでエラー:\n' + err);
       }
     });
 
-    window.addEventListener('DOMContentLoaded', () => { ta.focus(); });
-
-    // === 自動コピー機能 ===
-    const autoCopy = document.getElementById('autoCopy');
-    const autoStatus = document.getElementById('autoStatus');
-    const POLL_MS = 300;
-    const MIN_INTERVAL_MS = 500;
-    const SKIP_WHITESPACE_ONLY = true;
-
-    let lastText = '';
-    let lastCopiedAt = 0;
-    let autoTimer = null;
-
-    function hasMeaningfulChange(a, b) {
-      if (a === b) return false;
-      if (!SKIP_WHITESPACE_ONLY) return true;
-      return a.replace(/\s+/g,'') !== b.replace(/\s+/g,'');
+    // === フォーカス喪失トリガ（タイマー不使用） ===
+    function shouldCopyOnBlur() {
+      return copyOnBlur.checked;
     }
 
-    function setAutoStatus(msg) {
-      autoStatus.textContent = msg;
-    }
-
-    async function pollAndCopy() {
-      const now = Date.now();
-      const cur = ta.value;
-      if (hasMeaningfulChange(cur, lastText) && (now - lastCopiedAt) > MIN_INTERVAL_MS) {
-        if (cur.length === 0) {
-          lastText = cur;
-          return;
-        }
-        const res = await copyWithDedupe(cur);
-        if (res.ok) {
-          if (!res.skipped) lastCopiedAt = now;
-          lastText = cur;
-          setAutoStatus(res.skipped ? '自動コピー：重複のためスキップ' : `自動コピー済み（${new Date().toLocaleTimeString()}）`);
+    async function handleBlurLike() {
+      if (!shouldCopyOnBlur()) return;
+      const text = ta.value;
+      if (!text || !text.trim()) { setStatus('空文字のためコピーしません'); return; }
+      const res = await copyWithDedupe(text);
+      if (res.ok) {
+        if (res.skipped) {
+          setStatus(res.reason === 'clipboard-top-same' ? 'スキップ：既に最新内容が先頭' : 'スキップ：前回と同一');
         } else {
-          setAutoStatus('クリップボードへの自動コピーに失敗しました。HTTPS または localhost で実行されているかをご確認ください。');
+          setStatus(`フォーカス喪失でコピーしました（${new Date().toLocaleTimeString()}）`);
         }
-      }
-    }
-
-    async function startAutoCopy() {
-      lastText = ta.value;
-      try {
-        if (navigator.permissions && navigator.permissions.query) {
-          await navigator.permissions.query({ name: "clipboard-write" });
-        }
-      } catch {}
-      if (!autoTimer) {
-        autoTimer = setInterval(pollAndCopy, POLL_MS);
-        setAutoStatus('自動コピー：稼働中');
-      }
-    }
-
-    function stopAutoCopy() {
-      if (autoTimer) {
-        clearInterval(autoTimer);
-        autoTimer = null;
-      }
-      setAutoStatus('自動コピー：停止中');
-    }
-
-    autoCopy.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        startAutoCopy();
       } else {
-        stopAutoCopy();
+        setStatus('コピー失敗');
       }
+    }
+
+    // ウィンドウのフォーカス喪失
+    window.addEventListener('blur', handleBlurLike);
+
+    // タブの可視性変化（バックグラウンドに回ったらコピー）
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) handleBlurLike();
     });
 
-    ta.addEventListener('input', () => {
-      // pollAndCopy(); // 入力直後に即時コピーしたい場合に有効化
-    });
+    // ページが隠れる/破棄される（pagehide は iOS/Safari などでも有効）
+    window.addEventListener('pagehide', handleBlurLike);
 
-    stopAutoCopy();
+    // 初期
+    window.addEventListener('DOMContentLoaded', () => {
+      ta.focus();
+      setStatus('フォーカス喪失時コピー：停止中');
+    });
+    copyOnBlur.addEventListener('change', () => {
+      setStatus(copyOnBlur.checked ? 'フォーカス喪失時コピー：稼働中' : 'フォーカス喪失時コピー：停止中');
+    });
   </script>
 </body>
 </html>
