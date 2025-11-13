@@ -30,7 +30,6 @@
       <div id="status" class="hint" aria-live="polite"></div>
       <div class="hint">
         選択範囲がある場合は <b>選択中の部分だけ</b>、ない場合は <b>全体</b> をコピーします。<br />
-        クリップボード API は <b>HTTPS または localhost</b> で安定します。
       </div>
     </div>
   </div>
@@ -132,11 +131,6 @@
         }
         catch {}
       }
-    });
-
-    window.addEventListener('DOMContentLoaded', () => {
-      ta.focus();
-      setStatus('準備完了');
     });
   </script>
 </body>
