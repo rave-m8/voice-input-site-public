@@ -31,6 +31,7 @@
       <div class="hint">
         ボタンの動作:選択範囲がある場合は <b>選択中の部分だけ</b>、ない場合は <b>全体</b> をコピーします。<br />
         ショートカット:Ctrl+Enterで文字列全体をカット（クリップボードに転送）します。<br />
+        Ctrl+Cは選択範囲がない場合に全体をカット、選択がある場合は通常コピーします。<br />
       </div>
     </div>
   </div>
@@ -137,6 +138,25 @@
             ta.value = '';
           }
           ta.setSelectionRange(0, 0);
+        }
+      }
+      if (e.key.toLowerCase() === 'c' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const start = ta.selectionStart ?? 0;
+        const end = ta.selectionEnd ?? 0;
+        const hasSel = start !== end;
+        if (!hasSel) {
+          e.preventDefault();
+          const ok = await handleCopy();
+          if (ok) {
+            // Use an execCommand-based edit so Edge records undo history.
+            ta.focus();
+            ta.setSelectionRange(0, ta.value.length);
+            const cleared = document.execCommand('insertText', false, '');
+            if (!cleared) {
+              ta.value = '';
+            }
+            ta.setSelectionRange(0, 0);
+          }
         }
       }
     });
