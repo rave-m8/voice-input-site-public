@@ -123,6 +123,23 @@
       await handleCopy();
     });
 
+    ta.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault();
+        const ok = await handleCopy();
+        if (ok) {
+          // Use an execCommand-based edit so Edge records undo history.
+          ta.focus();
+          ta.setSelectionRange(0, ta.value.length);
+          const cleared = document.execCommand('insertText', false, '');
+          if (!cleared) {
+            ta.value = '';
+          }
+          ta.setSelectionRange(0, 0);
+        }
+      }
+    });
+
     copyAndCloseBtn.addEventListener('click', async () => {
       const ok = await handleCopy();
       if (ok) {
