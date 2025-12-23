@@ -10,7 +10,9 @@
     .textarea-wrap { flex: 1 1 auto; padding: 12px; box-sizing: border-box; }
     textarea { width: 100%; height: 100%; box-sizing: border-box; resize: none; font-size: 18px; line-height: 1.6; padding: 12px; }
     .footer { flex: 0 0 auto; padding: 12px; border-top: 1px solid #ddd; position: sticky; bottom: 0; background: #fff; }
-    button { width: 100%; padding: 14px 18px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
+    .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .row > * { margin-top:8px; }
+    button { padding: 12px 16px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
     .hint { font-size: 12px; color: #666; margin-top: 8px; }
     .toast { position: fixed; right: 12px; bottom: 12px; background: #333; color: #fff; padding: 10px 12px; border-radius: 8px; opacity: 0.95; display: none; }
   </style>
@@ -21,10 +23,13 @@
       <textarea id="editor" placeholder="ここにテキストを入れてください。"></textarea>
     </div>
     <div class="footer">
-      <button id="copyBtn" type="button">クリップボードへコピー</button>
+      <div class="row">
+        <button id="copyBtn" type="button">クリップボードへコピー</button>
+        <button id="copyAndCloseBtn" type="button">コピーして閉じる</button>
+      </div>
+      <div id="status" class="hint" aria-live="polite"></div>
       <div class="hint">
-        ※ HTTPS 環境（GitHub Pages 等）または localhost であれば、クリック操作でクリップボードへコピーできます。<br />
-        ※ コピー後はネイティブアプリ側で <kbd>Ctrl</kbd>+<kbd>V</kbd> 等でペーストしてください。
+        選択範囲がある場合は <b>選択中の部分だけ</b>、ない場合は <b>全体</b> をコピーします。<br />
       </div>
     </div>
   </div>
@@ -32,52 +37,118 @@
   <script>
     const ta = document.getElementById('editor');
     const copyBtn = document.getElementById('copyBtn');
+    const copyAndCloseBtn = document.getElementById('copyAndCloseBtn');
+    const statusEl = document.getElementById('status');
     const toast = document.getElementById('toast');
 
     function showToast(msg) {
       toast.textContent = msg;
       toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 1500);
+      setTimeout(() => { toast.style.display = 'none'; }, 1200);
+    }
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    function getSelectedOrAllText() {
+      const start = ta.selectionStart ?? 0;
+      const end   = ta.selectionEnd ?? 0;
+      if (start !== end) return ta.value.substring(start, end);
+      return ta.value;
     }
 
-    async function copyText(text) {
-      // Try modern API first
+    async function copyString(text) {
+      // 1) クリップボード API（推奨）
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         return true;
       }
-      // Fallback for non-secure contexts: execCommand
+      // 2) フォールバック（execCommand）
       try {
-        const selStart = ta.selectionStart, selEnd = ta.selectionEnd;
-        const prev = ta.value;
-        ta.select();
-        const ok = document.execCommand('copy');
-        // restore selection/caret
-        ta.value = prev;
-        ta.selectionStart = selStart;
-        ta.selectionEnd = selEnd;
-        ta.focus();
-        return ok;
+        const start = ta.selectionStart ?? 0;
+        const end   = ta.selectionEnd ?? 0;
+        const hasSel = start !== end;
+
+        if (hasSel) {
+          // 選択中の内容をそのままコピー
+          const ok = document.execCommand('copy');
+          return ok;
+        } else {
+          // 一旦全選択→コピー→元に戻す
+          const prevScrollTop  = ta.scrollTop;
+          const prevSelectionStart = start;
+          const prevSelectionEnd   = end;
+
+          ta.select();
+          const ok = document.execCommand('copy');
+
+          // 元の状態に戻す
+          ta.setSelectionRange(prevSelectionStart, prevSelectionEnd);
+          ta.scrollTop = prevScrollTop;
+          ta.focus();
+
+          return ok;
+        }
       } catch (e) {
+        console.error('copy fallback failed:', e);
+        return false;
+      }
+    }
+
+    async function handleCopy() {
+      const text = getSelectedOrAllText();
+      if (!text) {
+        setStatus('空文字のためコピーしません');
+        //return false;
+        //空文字でも閉じるためにokで返す。
+        const ok = !text;
+        return ok;
+      }
+
+      try {
+        const ok = await copyString(text);
+        if (ok) {
+          showToast('コピーしました');
+          setStatus(`コピーしました（${new Date().toLocaleTimeString()}）`);
+        } else {
+          setStatus('コピーに失敗しました。HTTPS(またはlocalhost)で実行してください。');
+        }
+        return ok;
+      } catch (err) {
+        console.error(err);
+        setStatus('コピーでエラーが発生しました。詳細はコンソールをご確認ください。');
         return false;
       }
     }
 
     copyBtn.addEventListener('click', async () => {
-      const text = ta.value;
-      try {
-        const ok = await copyText(text);
+      await handleCopy();
+    });
+
+    ta.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault();
+        const ok = await handleCopy();
         if (ok) {
-          showToast('コピーしました');
-        } else {
-          alert('クリップボードへのコピーに失敗しました。HTTPS(またはlocalhost)での実行をご確認ください。');
+          // Use an execCommand-based edit so Edge records undo history.
+          ta.focus();
+          ta.setSelectionRange(0, ta.value.length);
+          const cleared = document.execCommand('insertText', false, '');
+          if (!cleared) {
+            ta.value = '';
+          }
+          ta.setSelectionRange(0, 0);
         }
-      } catch (err) {
-        alert('クリップボードへのコピーでエラーが発生しました:\n' + err);
       }
     });
 
-    window.addEventListener('DOMContentLoaded', () => { ta.focus(); });
+    copyAndCloseBtn.addEventListener('click', async () => {
+      const ok = await handleCopy();
+      if (ok) {
+        try {
+          window.close();
+        }
+        catch {}
+      }
+    });
   </script>
 </body>
 </html>
