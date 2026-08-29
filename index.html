@@ -10,11 +10,18 @@
     .textarea-wrap { flex: 1 1 auto; padding: 12px; box-sizing: border-box; }
     textarea { width: 100%; height: 100%; box-sizing: border-box; resize: none; font-size: 18px; line-height: 1.6; padding: 12px; }
     .footer { flex: 0 0 auto; padding: 12px; border-top: 1px solid #ddd; position: sticky; bottom: 0; background: #fff; }
-    .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-    .row > * { margin-top:8px; }
+    .footer-content { display: flex; align-items: flex-end; gap: 20px; }
+    .row { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; flex-wrap: wrap; }
     button { padding: 12px 16px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; background: #f6f6f6; }
-    .hint { font-size: 12px; color: #666; margin-top: 8px; }
+    .hint { font-size: 12px; color: #666; }
+    .instructions { flex: 1 1 auto; line-height: 1.5; }
+    #status { margin-top: 8px; }
+    #status:empty { display: none; }
     .toast { position: fixed; right: 12px; bottom: 12px; background: #333; color: #fff; padding: 10px 12px; border-radius: 8px; opacity: 0.95; display: none; }
+    @media (max-width: 700px) {
+      .footer-content { align-items: stretch; flex-direction: column; gap: 8px; }
+      .instructions { order: -1; }
+    }
   </style>
 </head>
 <body>
@@ -23,16 +30,18 @@
       <textarea id="editor" placeholder="ここにテキストを入れてください。"></textarea>
     </div>
     <div class="footer">
-      <div class="row">
-        <button id="copyBtn" type="button">クリップボードへコピー</button>
-        <button id="copyAndCloseBtn" type="button">コピーして閉じる</button>
+      <div class="footer-content">
+        <div class="row">
+          <button id="copyBtn" type="button">クリップボードへコピー</button>
+          <button id="copyAndCloseBtn" type="button">コピーして閉じる</button>
+        </div>
+        <div class="hint instructions">
+          ボタンの動作:選択範囲がある場合は <b>選択中の部分だけ</b>、ない場合は <b>全体</b> をコピーします。<br />
+          ショートカット:Ctrl+Enterで文字列全体をカット（クリップボードに転送）します。<br />
+          Ctrl+Cは選択範囲がない場合に全体をカット、選択がある場合は通常コピーします。<br />
+        </div>
       </div>
       <div id="status" class="hint" aria-live="polite"></div>
-      <div class="hint">
-        ボタンの動作:選択範囲がある場合は <b>選択中の部分だけ</b>、ない場合は <b>全体</b> をコピーします。<br />
-        ショートカット:Ctrl+Enterで文字列全体をカット（クリップボードに転送）します。<br />
-        Ctrl+Cは選択範囲がない場合に全体をカット、選択がある場合は通常コピーします。<br />
-      </div>
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite">コピーしました</div>
